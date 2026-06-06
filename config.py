@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "IA Agent Orchestrator"
     DEBUG: bool = os.getenv("DEBUG", "True") == "True"
 
+    # Bot public URL (ngrok) para links de download nos chats
+    BOT_PUBLIC_URL: str = os.getenv("BOT_PUBLIC_URL", "http://localhost:3978")
+
     # API Version
     API_VERSION: str = "1.0.0"
 

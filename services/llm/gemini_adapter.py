@@ -7,6 +7,7 @@ from config import settings
 import json
 import logging
 import re
+import time
 
 class GeminiAdapter:
     def __init__(self):
@@ -61,16 +62,25 @@ class GeminiAdapter:
         return simplified_list
 
     def generate(self, prompt: str, system_instruction: str = None) -> str:
-        try:
-            model = genai.GenerativeModel(
-                self.model,
-                system_instruction=system_instruction if system_instruction else self.system_instruction
-            )
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            self.logger.error(f"Erro na geração Gemini: {str(e)}")
-            return ""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                model = genai.GenerativeModel(
+                    self.model,
+                    system_instruction=system_instruction if system_instruction else self.system_instruction
+                )
+                response = model.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                err_str = str(e)
+                self.logger.error(f"Erro na geração Gemini (tentativa {attempt+1}/{max_retries}): {err_str}")
+                if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+                    wait = 10 * (attempt + 1)
+                    self.logger.warning(f"Rate limit detectado. Aguardando {wait}s antes de tentar novamente.")
+                    time.sleep(wait)
+                else:
+                    break
+        return ""
         
     def consolidate_final_response(self, context: ExecutionContext, formatting_guidelines: List[str]) -> str:
         """
@@ -86,6 +96,8 @@ class GeminiAdapter:
                 "Para construir a resposta final, você DEVE seguir estas regras de formatação para as informações correspondentes:\n"
                 f"- {formatted_guidelines}"
             )
+
+        bot_public_url = settings.BOT_PUBLIC_URL.rstrip("/")
 
         prompt = f"""
         ## 🤖 Persona
@@ -105,7 +117,7 @@ class GeminiAdapter:
 
         ### Raciocínio Interno da Equipe (Para seu Contexto):
         ```
-        {"\n".join(context.react_history)}
+        {chr(10).join(context.react_history)}
         ```
         ---
         {guidelines_section}
@@ -116,7 +128,10 @@ class GeminiAdapter:
         2. **Baseie-se nos Fatos:** Sua resposta deve sintetizar **todas as informações de contexto disponíveis**. Se os `Resultados Brutos das Ferramentas` contiverem dados, eles são a fonte primária da verdade. Se estiverem vazios, use o `Raciocínio Interno da Equipe` para formular sua resposta, pois ele pode conter a conclusão direta encontrada pelo orquestrador. Não invente informações que não estejam no contexto fornecido.
         3. **Fale com o Usuário:** A resposta final deve ser direcionada ao usuário, não um relatório técnico.
         4. **Lide com Falhas:** Se os resultados indicarem que uma tarefa falhou, informe isso ao usuário de forma simples e direta.
-        
+        5. **Links de Download de Documentos:** Se os Resultados Brutos das Ferramentas contiverem documentos (identificados por linhas como `### Documento: nome_do_arquivo` seguidas de `Id: HASH`), adicione ao **final da resposta** uma seção chamada "📎 **Documentos Citados**" com um link para download de cada documento único encontrado, no formato de markdown:
+           [📄 nome_do_arquivo]({bot_public_url}/download/HASH)
+           Use exatamente o hash que aparece na linha `Id:` do documento. Não invente hashes.
+
         Agora, gere a resposta final para o usuário.
         """
         return self.generate(prompt).strip()

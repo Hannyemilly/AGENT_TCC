@@ -43,8 +43,14 @@ class DefinitionLoader:
         )
 
         if not user_data:
-            print(f"Usuário '{user_id}' não encontrado.")
-            return [], {}
+            print(f"Usuário '{user_id}' não encontrado. Usando configuração padrão.")
+            user_data = self.db.user.find_one(
+                {"username": "tarick"},
+                {"projects": 1, "settings": 1, "_id": 0}
+            )
+            if not user_data:
+                print("Usuário padrão 'tarick' também não encontrado.")
+                return [], {}
         
         # Obter os projetos e as configurações
         user_project_names = user_data.get("projects", [])

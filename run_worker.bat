@@ -1,5 +1,4 @@
 @echo off
-echo Iniciando o AI Agent Worker com Dramatiq e 8 threads...
+echo Iniciando o AI Agent Worker com 1 processo e 2 threads...
 
-rem O correto é chamar o MÓDULO 'worker', sem a extensão '.py'
-dramatiq worker --threads 1
+.venv\Scripts\python.exe -m dramatiq main --processes 1 --threads 2

@@ -10,7 +10,7 @@ def send_test_task():
 
     # Cole a sua URL única do webhook.site aqui!
     # A resposta do AI Agent aparecerá na página daquele site.
-    callback_url = ""
+    callback_url = "https://webhook.site/81c02bd1-7946-4abc-814c-3b0537ed1e4a"
 
     # Este é o payload da tarefa, imitando o que um Gateway real enviaria.
     job_payload = {

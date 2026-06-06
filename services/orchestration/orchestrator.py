@@ -176,11 +176,9 @@ class Orchestrator:
     
     def _build_final_response_with_guidelines(self, context: ExecutionContext) -> str:
         """Coleta as diretrizes dos agentes executados e gera a resposta final."""
-        
+
         formatting_guidelines = []
-        # Itera sobre os IDs dos agentes que produziram resultados
         for agent_id in context.previous_results.keys():
-            # Busca a definição do agente no dicionário carregado no contexto
             agent_def = context.available_agents.get(agent_id)
             if agent_def and agent_def.response_guideline:
                 guideline_with_context = (
@@ -188,8 +186,12 @@ class Orchestrator:
                     f"siga esta regra de formato: '{agent_def.response_guideline}'"
                 )
                 formatting_guidelines.append(guideline_with_context)
-        
-        return self.gemini.consolidate_final_response(context, formatting_guidelines)
+
+        result = self.gemini.consolidate_final_response(context, formatting_guidelines)
+        if not result:
+            self.logger.warning("consolidate_final_response retornou vazio. Usando fallback.")
+            result = "Desculpe, encontrei um problema ao processar sua resposta. Por favor, tente novamente em instantes."
+        return result
     
     def _log_final_response(self, context: ExecutionContext, response: str):
         """Loga a resposta final nos históricos."""

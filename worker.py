@@ -1,5 +1,6 @@
 # worker.py
 import logging
+import os
 import requests
 from requests.exceptions import RequestException
 import dramatiq
@@ -9,7 +10,7 @@ from services.orchestration.orchestrator import Orchestrator
 
 # 1. Configuração do Broker do Dramatiq
 # Aponta para o mesmo Redis que usávamos antes.
-redis_broker = RedisBroker(url="redis://localhost:6379/0")
+redis_broker = RedisBroker(url=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 dramatiq.set_broker(redis_broker)
 
 # Configuração do logger

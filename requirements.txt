@@ -7,3 +7,5 @@ pymongo==4.6.2
 dramatiq[redis]
 redis
 requests
+qdrant-client
+

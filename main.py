@@ -25,7 +25,10 @@ async def _rag_token_refresh_loop():
             await asyncio.to_thread(renovar_token)
             logger.info("Token RAG renovado com sucesso.")
         except Exception as e:
-            logger.warning(f"Falha ao renovar token RAG (tentará novamente em 4h): {e}")
+            # RAG pode ainda estar subindo (baixando modelos) — tenta de novo logo
+            logger.warning(f"Falha ao renovar token RAG (tentará novamente em 30s): {e}")
+            await asyncio.sleep(30)
+            continue
         await asyncio.sleep(RAG_TOKEN_REFRESH_INTERVAL)
 
 @asynccontextmanager

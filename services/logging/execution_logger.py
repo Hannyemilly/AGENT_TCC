@@ -49,6 +49,7 @@ class ExecutionLogger:
             "orchestrator": [],
             "managers": [],
             "final_output": "",
+            "insufficient_context": False,
             "pending_actions": [],
             "metadata": {
                 "api_version": settings.API_VERSION,
@@ -176,6 +177,21 @@ class ExecutionLogger:
                 "full_output": output
             }
         )
+        self._flag_insufficient_context(session_id, success, output)
+
+    def _flag_insufficient_context(self, session_id: str, success: bool, output: str):
+        """Marca a execução quando uma ferramenta falha ou o serviço consultado
+        responde sem contexto (ex.: RAG retorna {"success": false, ...}).
+        O painel administrativo usa este campo para listar respostas incompletas."""
+        no_context = not success
+        if not no_context:
+            try:
+                data = json.loads(output)
+                no_context = isinstance(data, dict) and data.get("success") is False
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if no_context and session_id in self._execution_registry:
+            self._execution_registry[session_id]["insufficient_context"] = True
 
     def get_execution_log(self, session_id: str) -> Optional[dict]:
         """Recupera todos os logs de uma sessão do MongoDB, do mais novo para o mais antigo."""

@@ -9,6 +9,26 @@ import logging
 import re
 import time
 
+# Pares de pergunta e resposta cadastrados no painel viram arquivos internos "par_<id>.txt".
+# Eles servem de contexto, mas não são documentos para o aluno baixar.
+_INTERNAL_DOC = re.compile(r"par_[0-9a-fA-F]{24}\.txt")
+_CITED_HEADER = re.compile(r"^\s*📎?\s*\**\s*Documentos Citados\s*\**\s*:?\s*$", re.IGNORECASE)
+
+
+def remove_internal_citations(text: str) -> str:
+    """Tira de \"Documentos Citados\" os links para arquivos internos dos pares de P&R
+    e remove a seção inteira quando não sobra nenhum documento."""
+    if not text or not _INTERNAL_DOC.search(text):
+        return text
+    lines = [l for l in text.split("\n") if not _INTERNAL_DOC.search(l)]
+    for i, line in enumerate(lines):
+        if _CITED_HEADER.match(line):
+            rest = lines[i + 1:]
+            if not any("](" in l for l in rest):
+                lines = lines[:i] + [l for l in rest if l.strip()]
+            break
+    return "\n".join(lines).rstrip()
+
 class GeminiAdapter:
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -131,10 +151,11 @@ class GeminiAdapter:
         5. **Links de Download de Documentos:** Se os Resultados Brutos das Ferramentas contiverem documentos (identificados por linhas como `### Documento: nome_do_arquivo` seguidas de `Id: HASH`), adicione ao **final da resposta** uma seção chamada "📎 **Documentos Citados**" com um link para download de cada documento único encontrado, no formato de markdown:
            [📄 nome_do_arquivo]({bot_public_url}/download/HASH)
            Use exatamente o hash que aparece na linha `Id:` do documento. Não invente hashes.
+           Não cite arquivos cujo nome começa com `par_` (são pares de pergunta e resposta internos da base, não documentos para baixar).
 
         Agora, gere a resposta final para o usuário.
         """
-        return self.generate(prompt).strip()
+        return remove_internal_citations(self.generate(prompt).strip())
 
     def decide_next_manager_action(self, context: ExecutionContext, chat_history:list) -> dict:
         """

@@ -196,8 +196,8 @@ class ManagerExecutor:
             manager_id=manager.manager_id,
             agent_id=agent_id,
             tool_name=tool_name,
-            success=True,
-            output=result.output
+            success=bool(getattr(result, "success", True)),
+            output=observation
         )
         
         # Armazenar resultado no contexto

@@ -1,5 +1,6 @@
 # tools/plugins/api_tool.py
 import requests
+from urllib.parse import quote
 from tools.base_tool import BaseTool
 from models.schemas import ToolResult, ExecutionContext, ToolSchema, ApiConfigSchema
 import json
@@ -40,7 +41,8 @@ class ApiTool(BaseTool):
         for key, value in params.items():
             placeholder = f"{{{key}}}"
             if placeholder in prepared_data["url"]:
-                prepared_data["url"] = prepared_data["url"].replace(placeholder, str(value))
+                # Codifica o valor: "&", "#" e "+" na pergunta quebravam a URL
+                prepared_data["url"] = prepared_data["url"].replace(placeholder, quote(str(value), safe=""))
                 params_usados.add(key)
 
         # 2. Processar parâmetros de body (para POST, PUT, etc.)
@@ -85,7 +87,8 @@ class ApiTool(BaseTool):
                 headers=request_data.get("headers", {}),
                 params=request_data.get("params", {}),
                 json=request_data.get("json"),
-                #timeout=30
+                # Sem tempo limite uma pergunta podia ficar presa por até 10 minutos
+                timeout=60
             )
             response.raise_for_status()
 

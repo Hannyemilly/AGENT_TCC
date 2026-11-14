@@ -7,6 +7,7 @@ import dramatiq
 from dramatiq.brokers.redis import RedisBroker
 
 from services.orchestration.orchestrator import Orchestrator
+from services.logging.execution_logger import execution_logger
 
 # 1. Configuração do Broker do Dramatiq
 # Aponta para o mesmo Redis que usávamos antes.
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 orchestrator = Orchestrator()
 
-@dramatiq.actor(max_retries=3, time_limit=600000) # Timeout de 10 minutos
+# Sem novas tentativas automáticas: cada tentativa refazia a pergunta inteira, mandava
+# outra mensagem de falha ao aluno, gravava a pergunta de novo e gastava a cota do Gemini.
+@dramatiq.actor(max_retries=0, time_limit=600000) # Timeout de 10 minutos
 def process_ai_request(job_payload: dict):
     """
     Esta é a tarefa assíncrona que o worker do Dramatiq executará.
@@ -40,6 +43,12 @@ def process_ai_request(job_payload: dict):
     except Exception as e:
         logger.exception(f"Erro CRÍTICO ao processar a tarefa {task_id}: {e}")
         status = "failed"
+        # Registra a execução com status "failed" (antes ela se perdia e o painel
+        # nunca mostrava falhas em Perguntas Não Respondidas)
+        try:
+            execution_logger.finalize_execution_log(job_payload.get("session_id"), status="failed")
+        except Exception as log_error:
+            logger.error(f"Não foi possível registrar a falha da tarefa {task_id}: {log_error}")
         raise e
 
     finally:

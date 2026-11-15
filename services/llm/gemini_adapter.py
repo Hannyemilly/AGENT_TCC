@@ -12,7 +12,11 @@ import time
 # Pares de pergunta e resposta cadastrados no painel viram arquivos internos "par_<id>.txt".
 # Eles servem de contexto, mas não são documentos para o aluno baixar.
 _INTERNAL_DOC = re.compile(r"par_[0-9a-fA-F]{24}\.txt")
-_CITED_HEADER = re.compile(r"^\s*📎?\s*\**\s*Documentos Citados\s*\**\s*:?\s*$", re.IGNORECASE)
+_CITED_HEADER = re.compile(
+    r"^\s*(?:📎|📄|🔗)?\s*\**\s*(?:Documentos Citados|Fontes?(?: da informação| consultadas| utilizadas)?|Referências)"
+    r"\s*\**\s*:?\s*\**\s*$",
+    re.IGNORECASE,
+)
 
 
 def remove_internal_citations(text: str) -> str:

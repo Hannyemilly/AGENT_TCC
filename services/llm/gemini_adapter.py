@@ -81,6 +81,28 @@ class GeminiAdapter:
 
         return simplified_list
 
+    @staticmethod
+    def _texto_da_resposta(response) -> str:
+        """Texto da resposta do Gemini. Alguns modelos dividem a resposta em várias partes,
+        e o atalho response.text só aceita uma; aqui as partes de texto são juntadas."""
+        try:
+            return response.text
+        except ValueError:
+            partes = []
+            for candidato in getattr(response, "candidates", None) or []:
+                conteudo = getattr(candidato, "content", None)
+                for parte in getattr(conteudo, "parts", None) or []:
+                    if getattr(parte, "thought", False):
+                        continue
+                    texto = getattr(parte, "text", "")
+                    if texto:
+                        partes.append(texto)
+                if partes:
+                    break
+            if not partes:
+                raise
+            return "".join(partes)
+
     def generate(self, prompt: str, system_instruction: str = None) -> str:
         max_retries = 3
         for attempt in range(max_retries):
@@ -90,7 +112,7 @@ class GeminiAdapter:
                     system_instruction=system_instruction if system_instruction else self.system_instruction
                 )
                 response = model.generate_content(prompt)
-                return response.text
+                return self._texto_da_resposta(response)
             except Exception as e:
                 err_str = str(e)
                 self.logger.error(f"Erro na geração Gemini (tentativa {attempt+1}/{max_retries}): {err_str}")

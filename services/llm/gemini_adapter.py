@@ -1,5 +1,7 @@
 # services/llm/gemini_adapter.py
 import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
+from google.api_core import retry as google_retry
 from datetime import datetime
 from models.schemas import ExecutionContext, ManagerSchema, ToolResult
 from typing import List
@@ -17,6 +19,43 @@ _CITED_HEADER = re.compile(
     r"\s*\**\s*:?\s*\**\s*$",
     re.IGNORECASE,
 )
+
+# Com o modelo sobrecarregado (erro 503), a biblioteca do Google repete o pedido sozinha
+# por até 10 minutos e a pergunta fica parada. Aqui são só alguns segundos; depois o pedido
+# passa para o próximo modelo da lista (GEMINI_MODEL e, em seguida, GEMINI_FALLBACK_MODELS).
+_REPETIR_SE_SOBRECARREGADO = google_retry.Retry(
+    initial=1.0,
+    maximum=4.0,
+    multiplier=2.0,
+    predicate=google_retry.if_exception_type(google_exceptions.ServiceUnavailable),
+    timeout=10.0,
+)
+_TEMPO_LIMITE_PEDIDO = 90.0  # segundos para o modelo devolver uma resposta
+
+# O modelo que falhou vai para o fim da fila por um tempo (em segundos), conforme o erro.
+_PAUSA_COTA = 60  # 429: limite de pedidos por minuto ou cota do dia
+_PAUSA_SOBRECARGA = 600  # 503, 500 ou tempo esgotado
+_PAUSA_MODELO_RETIRADO = 3600  # 404: modelo desativado para o projeto
+_pausado_ate: dict = {}
+
+
+def _pausa_para(erro: Exception):
+    """Tempo que o modelo fica no fim da fila depois deste erro, ou None quando o erro
+    não é de disponibilidade do modelo (aí trocar de modelo não ajuda)."""
+    if isinstance(erro, google_exceptions.ResourceExhausted):
+        return _PAUSA_COTA
+    if isinstance(erro, google_exceptions.NotFound):
+        return _PAUSA_MODELO_RETIRADO
+    if isinstance(erro, (google_exceptions.ServiceUnavailable, google_exceptions.RetryError,
+                         google_exceptions.DeadlineExceeded, google_exceptions.InternalServerError,
+                         TimeoutError)):
+        return _PAUSA_SOBRECARGA
+    texto = str(erro).lower()
+    if "429" in texto or "quota" in texto or "rate limit" in texto or "resource_exhausted" in texto:
+        return _PAUSA_COTA
+    if any(p in texto for p in ("503", "high demand", "overloaded", "unavailable", "deadline", "timed out")):
+        return _PAUSA_SOBRECARGA
+    return None
 
 
 def remove_internal_citations(text: str) -> str:
@@ -37,6 +76,8 @@ class GeminiAdapter:
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
         self.model = settings.GEMINI_MODEL
+        reservas = [m.strip() for m in (settings.GEMINI_FALLBACK_MODELS or "").split(",") if m.strip()]
+        self.models = list(dict.fromkeys([self.model] + reservas))
         self.logger = logging.getLogger(__name__)
         self.system_instruction = self._load_system_instruction()
 
@@ -107,25 +148,44 @@ class GeminiAdapter:
                 raise
             return "".join(partes)
 
+    def _modelos_em_ordem(self) -> List[str]:
+        """Principal e reservas, com os que falharam há pouco no fim da fila."""
+        agora = time.time()
+        livres = [m for m in self.models if _pausado_ate.get(m, 0) <= agora]
+        pausados = sorted((m for m in self.models if _pausado_ate.get(m, 0) > agora),
+                          key=lambda m: _pausado_ate[m])
+        return livres + pausados
+
     def generate(self, prompt: str, system_instruction: str = None) -> str:
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                model = genai.GenerativeModel(
-                    self.model,
-                    system_instruction=system_instruction if system_instruction else self.system_instruction
-                )
-                response = model.generate_content(prompt)
-                return self._texto_da_resposta(response)
-            except Exception as e:
-                err_str = str(e)
-                self.logger.error(f"Erro na geração Gemini (tentativa {attempt+1}/{max_retries}): {err_str}")
-                if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                    wait = 10 * (attempt + 1)
-                    self.logger.warning(f"Rate limit detectado. Aguardando {wait}s antes de tentar novamente.")
-                    time.sleep(wait)
-                else:
-                    break
+        instrucao = system_instruction if system_instruction else self.system_instruction
+        rodadas = 3
+        for rodada in range(rodadas):
+            so_limite_de_pedidos = True
+            for modelo in self._modelos_em_ordem():
+                try:
+                    model = genai.GenerativeModel(modelo, system_instruction=instrucao)
+                    response = model.generate_content(
+                        prompt,
+                        request_options={"retry": _REPETIR_SE_SOBRECARREGADO, "timeout": _TEMPO_LIMITE_PEDIDO},
+                    )
+                    texto = self._texto_da_resposta(response)
+                except Exception as e:
+                    self.logger.error(f"Erro na geração Gemini com {modelo} (rodada {rodada + 1}/{rodadas}): {e}")
+                    pausa = _pausa_para(e)
+                    if pausa is None:
+                        return ""
+                    _pausado_ate[modelo] = time.time() + pausa
+                    so_limite_de_pedidos = so_limite_de_pedidos and pausa == _PAUSA_COTA
+                    continue
+                if modelo != self.model:
+                    self.logger.warning(f"Resposta gerada pelo modelo reserva {modelo} ({self.model} indisponível).")
+                return texto
+            # Só vale esperar e tentar de novo quando todos bateram no limite de pedidos por minuto.
+            if not so_limite_de_pedidos or rodada == rodadas - 1:
+                break
+            espera = 10 * (rodada + 1)
+            self.logger.warning(f"Limite de pedidos em todos os modelos. Aguardando {espera}s antes de tentar novamente.")
+            time.sleep(espera)
         return ""
         
     def consolidate_final_response(self, context: ExecutionContext, formatting_guidelines: List[str]) -> str:

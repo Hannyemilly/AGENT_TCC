@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     # LLM GEMINI
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    # Modelos tentados, em ordem, quando o principal está sobrecarregado ou sem cota
+    # (nomes separados por vírgula; vazio = só o principal)
+    GEMINI_FALLBACK_MODELS: str = os.getenv("GEMINI_FALLBACK_MODELS", "")
     
     # MONGODB
     MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
